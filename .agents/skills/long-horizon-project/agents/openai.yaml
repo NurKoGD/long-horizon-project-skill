@@ -1,0 +1,4 @@
+interface:
+  display_name: "Long Horizon Project"
+  short_description: "Resume multi-phase projects with compact file-based handoffs"
+  default_prompt: "Use long-horizon-project to resume this project from its checkpoint."
