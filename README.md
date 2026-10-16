@@ -1,5 +1,7 @@
 # long-horizon-project
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 A cross-agent skill for long-running coding projects. It keeps durable project state outside the conversation so an agent can resume work across conversations, context resets, and devices with a smaller context load.
 
 This repository is the distributable source package. The reusable skill lives under `.agents/skills/`; the repository root contains documentation and maintenance material.
