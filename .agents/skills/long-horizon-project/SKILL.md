@@ -25,16 +25,20 @@ If a private state-repository URL is available and `skilluse/` is absent or empt
 
 The initializer creates only missing state files and directories. It does not overwrite existing state, initialize or push a remote repository, or discard user files. It adds only `/skilluse/` to the project `.gitignore` when the project is a Git repository.
 
+If Python is unavailable, do the same by hand: create `skilluse/{context,plans/phases,logs,artifacts,local}`, copy `templates/current.md`, `templates/decisions.md`, and `templates/backlog.md`, replace `{{skill_version}}` with the contents of `VERSION`, and add `/skilluse/` to `.gitignore`. Do not skip the checkpoint because a script could not run.
+
 Read the smallest useful context in this order:
 
 1. `skilluse/context/current.md` (normally under 500 words).
-2. The current phase file under `skilluse/plans/phases/`, if present.
+2. The phase file named by its `phase_file` field, for example `skilluse/plans/phases/01-parse.md`, created from [templates/phase.md](templates/phase.md).
 3. `skilluse/context/decisions.md` only when relevant.
 4. Relevant setup material from `README.md`.
 5. Project Git status and HEAD; also `git -C skilluse status` and HEAD when `skilluse/` is a Git repository.
 6. Only source files and tests required by the current phase.
 
 Do not reread the full conversation, old logs, or unrelated directories unless the checkpoint is missing or contradicted by observable project state.
+
+Then run the validator before changing code. It reports a stale checkpoint, a missing phase file, and Skill version drift in one command.
 
 If `current.md` is missing, reconstruct only the minimum durable facts from the current conversation and repository evidence, then create a checkpoint before changing business code. Trust code and Git state over an outdated note and record discrepancies.
 
@@ -45,9 +49,10 @@ Put assistant-work artifacts whose path is controllable under `skilluse/`:
 ```text
 skilluse/context/       durable checkpoint and decisions
 skilluse/plans/phases/  phase scope and acceptance criteria
+skilluse/plans/backlog.md  work discovered outside the current phase
 skilluse/logs/          verbose logs
 skilluse/artifacts/     reports, screenshots, exports
-skilluse/local/         machine-specific data; never secrets
+skilluse/local/         machine-specific data; never secrets; ignored by the state repository
 ```
 
 Keep project deliverables in normal locations such as `src/`, `app/`, `tests/`, configuration directories, and user-requested documentation. Before using another Skill, classify each output as a deliverable or assistant artifact. Read [references/output-routing.md](references/output-routing.md) when the distinction is unclear.
@@ -60,6 +65,8 @@ A third-party Skill with a configurable output path should be routed into `skill
 - Keep context compact; summarize durable discoveries in state files instead of repeating them in chat.
 - Run focused verification before broad checks. A successful exit code with zero tests discovered, zero files checked, or no meaningful assertions is not verification evidence; record it as inconclusive and choose a check that exercises the phase.
 - Do not silently broaden scope because the next phase is obvious.
+- Record out-of-scope discoveries in `skilluse/plans/backlog.md` instead of widening the phase or losing them.
+- Keep `current.md` inside its word budget: move finished items to the phase file and keep only this phase's state.
 - When context becomes large or costly, checkpoint and start a fresh conversation using the next action.
 
 ## Handoff And Cross-Device Checkpoint
@@ -67,15 +74,15 @@ A third-party Skill with a configurable output path should be routed into `skill
 Before handing work to another conversation or device:
 
 1. Run the phase verification, or record why it could not run.
-2. Update `skilluse/context/current.md` using [templates/current.md](templates/current.md).
-3. Record important decisions in `skilluse/context/decisions.md`.
+2. Update `skilluse/context/current.md` using [templates/current.md](templates/current.md), including `status`, `updated`, `skill_version`, and both repository heads.
+3. Record important decisions in `skilluse/context/decisions.md` using [templates/decisions.md](templates/decisions.md).
 4. Run the validator using the same Skill-directory path resolution:
 
 ```text
 python "<skill-directory>/scripts/validate_skilluse.py" <project-path>
 ```
 
-5. Confirm the phase is `in_progress` or `complete`; completion requires acceptance criteria and verification evidence.
+5. Confirm `status` is `in_progress`, `blocked`, or `complete`. `blocked` needs `blocked_reason`; `complete` needs acceptance criteria and verification evidence.
 
 For a cross-device checkpoint, the project working tree must be clean. If it is dirty, state exactly what will not transfer and do not call the checkpoint synchronized. Follow the project's documented Git workflow, the user's explicit Git instructions, and any active Git-specific Skill when deciding whether and how to commit or push. This Skill neither requires nor forbids `commit`, `push`, `reset`, or other Git operations. It only requires that the actual Git result be recorded in `current.md`.
 
@@ -89,7 +96,7 @@ The next device pulls both repositories and compares the recorded code commit be
 
 ## Completion Boundary
 
-Stop after updating the checkpoint at the end of a phase. Provide a short continuation prompt:
+Stop after updating the checkpoint at the end of a phase. Provide the continuation prompt from [templates/handoff-prompt.md](templates/handoff-prompt.md):
 
 ```text
 Use $long-horizon-project. Resume from skilluse/context/current.md, verify the recorded code checkpoint against both repositories, and continue only the current phase's Next Action.

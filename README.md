@@ -26,6 +26,7 @@ The skill does not migrate chat transcripts, create conversations, choose a Git 
 │   └── skills/
 │       └── long-horizon-project/
 │           ├── SKILL.md
+│           ├── VERSION
 │           ├── agents/openai.yaml
 │           ├── references/
 │           ├── scripts/
@@ -141,11 +142,27 @@ project/
     ├── context/
     │   ├── current.md
     │   └── decisions.md
-    ├── plans/phases/
+    ├── plans/
+    │   ├── backlog.md
+    │   └── phases/
     ├── logs/
     ├── artifacts/
-    └── local/
+    └── local/           # ignored by the state repository
 ```
+
+`current.md` starts with a small front matter block that keeps the checkpoint machine-checkable:
+
+```yaml
+phase: 01-parse
+phase_file: plans/phases/01-parse.md
+status: in_progress        # in_progress | blocked | complete
+updated: 2026-11-12T00:40Z
+skill_version: 0.2.0
+project_repo: { branch: main, head: e1f5ed3, pushed: true }
+state_repo: { branch: main, head: 59f6712, pushed: true }
+```
+
+`blocked` requires `blocked_reason`; `complete` requires acceptance criteria in the phase file and verification evidence in the checkpoint. Older prose-only checkpoints are still validated, with a note asking for migration.
 
 Keep project deliverables in normal project paths. Put controllable plans, handoffs, reports, screenshots, and logs under `skilluse/`. Do not put secrets or machine-specific absolute paths in state files.
 

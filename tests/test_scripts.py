@@ -22,6 +22,57 @@ VALIDATE = SKILL_DIR / "scripts" / "validate_skilluse.py"
 GIT = shutil.which("git")
 
 
+SKILL_VERSION = (SKILL_DIR / "VERSION").read_text(encoding="utf-8").strip()
+
+
+def structured(
+    project_head: str = "",
+    state_head: str = "",
+    status: str = "in_progress",
+    phase_file: str = "plans/phases/01-alpha.md",
+    version: str | None = None,
+    blocked_reason: str | None = None,
+    verification: str = "- `python -m unittest`: passed (12 tests)",
+) -> str:
+    lines = [
+        "---",
+        "phase: 01-alpha",
+    ]
+    if phase_file:
+        lines.append(f"phase_file: {phase_file}")
+    lines += [
+        f"status: {status}",
+        "updated: 2026-11-12T00:40Z",
+        f"skill_version: {version if version is not None else SKILL_VERSION}",
+    ]
+    if blocked_reason is not None:
+        lines.append(f"blocked_reason: {blocked_reason}")
+    lines += [
+        "project_repo:",
+        "  branch: main",
+        f"  head: {project_head}",
+        "  pushed: false",
+        "state_repo:",
+        "  branch: main",
+        f"  head: {state_head}",
+        "  pushed: false",
+        "---",
+        "",
+        "# Current State",
+        "",
+        "## Goal",
+        "Parse the configuration file.",
+        "",
+        "## Verification",
+        verification,
+        "",
+        "## Next Action",
+        "Write the tokenizer.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def checkpoint(
     project_head: str = "",
     state_head: str = "",
@@ -129,12 +180,19 @@ class InitTests(ScriptTestCase):
             self.assertTrue((project / "skilluse" / name).is_dir(), name)
         self.assertIn("/skilluse/", (project / ".gitignore").read_text(encoding="utf-8").splitlines())
         self.assertIn("local/", (project / "skilluse" / ".gitignore").read_text(encoding="utf-8").splitlines())
+        self.assertTrue((project / "skilluse" / "plans" / "backlog.md").is_file())
+        current = (project / "skilluse" / "context" / "current.md").read_text(encoding="utf-8")
+        self.assertIn(f"skill_version: {SKILL_VERSION}", current)
+        self.assertNotIn("{{skill_version}}", current)
 
     def test_preserves_existing_state(self) -> None:
         project = self.make_project()
         self.write_state(project, "# Current State\n\nhand written\n")
         decisions = project / "skilluse" / "context" / "decisions.md"
         decisions.write_text("# Decisions\n\nhand written\n", encoding="utf-8")
+        backlog = project / "skilluse" / "plans" / "backlog.md"
+        backlog.parent.mkdir(parents=True, exist_ok=True)
+        backlog.write_text("# Backlog\n\nhand written\n", encoding="utf-8")
 
         result = self.init(project)
 
@@ -326,6 +384,177 @@ class ValidateTests(ScriptTestCase):
         result = self.validate(project)
 
         self.assertNotIn(".gitignore entry", result.stdout)
+
+    def test_legacy_format_is_reported_as_note(self) -> None:
+        project = self.make_project()
+        self.init(project)
+        self.commit_gitignore(project)
+        self.write_state(project, checkpoint(project_head=self.head(project)))
+
+        result = self.validate(project)
+
+        self.assertIn("legacy", result.stdout)
+        self.assertNotIn("WARN", result.stdout)
+
+
+@unittest.skipUnless(GIT, "git is required for these tests")
+class StructuredCheckpointTests(ScriptTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.project = self.make_project()
+        self.init(self.project)
+        self.commit_gitignore(self.project)
+        self.phase = self.project / "skilluse" / "plans" / "phases" / "01-alpha.md"
+        self.phase.parent.mkdir(parents=True, exist_ok=True)
+        self.phase.write_text(
+            "# Phase 01: alpha\n\n## Scope\nParse it.\n\n## Acceptance Criteria\n- parses a file\n",
+            encoding="utf-8",
+        )
+
+    def test_structured_checkpoint_passes_strict(self) -> None:
+        self.write_state(
+            self.project,
+            structured(project_head=self.head(self.project), state_head="local-only"),
+        )
+
+        result = self.validate(self.project, "--strict")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("OK", result.stdout)
+        self.assertNotIn("WARN", result.stdout)
+
+    def test_invalid_status_is_an_error(self) -> None:
+        self.write_state(
+            self.project,
+            structured(project_head=self.head(self.project), status="done"),
+        )
+
+        result = self.validate(self.project)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("status must be one of", result.stdout)
+
+    def test_blocked_requires_a_reason(self) -> None:
+        self.write_state(
+            self.project,
+            structured(project_head=self.head(self.project), status="blocked"),
+        )
+
+        result = self.validate(self.project, "--strict")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("blocked_reason", result.stdout)
+
+    def test_blocked_with_reason_is_clean(self) -> None:
+        self.write_state(
+            self.project,
+            structured(
+                project_head=self.head(self.project),
+                status="blocked",
+                blocked_reason="waiting for API credentials",
+            ),
+        )
+
+        result = self.validate(self.project, "--strict")
+
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_missing_phase_file_warns(self) -> None:
+        self.write_state(
+            self.project,
+            structured(
+                project_head=self.head(self.project),
+                phase_file="plans/phases/99-missing.md",
+            ),
+        )
+
+        result = self.validate(self.project)
+
+        self.assertIn("phase_file does not exist", result.stdout)
+
+    def test_phase_file_cannot_escape_skilluse(self) -> None:
+        self.write_state(
+            self.project,
+            structured(project_head=self.head(self.project), phase_file="../outside.md"),
+        )
+
+        result = self.validate(self.project)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("must stay inside skilluse/", result.stdout)
+
+    def test_version_drift_warns(self) -> None:
+        self.write_state(
+            self.project,
+            structured(project_head=self.head(self.project), version="0.0.1"),
+        )
+
+        result = self.validate(self.project)
+
+        self.assertIn("skill version 0.0.1", result.stdout)
+
+    def test_complete_requires_acceptance_criteria(self) -> None:
+        self.phase.write_text("# Phase 01: alpha\n\n## Scope\nParse it.\n", encoding="utf-8")
+        self.write_state(
+            self.project,
+            structured(project_head=self.head(self.project), status="complete"),
+        )
+
+        result = self.validate(self.project)
+
+        self.assertIn("## Acceptance Criteria", result.stdout)
+
+    def test_flow_mapping_heads_are_parsed(self) -> None:
+        head = self.head(self.project)
+        content = (
+            "---\n"
+            "phase: 01-alpha\n"
+            "status: in_progress\n"
+            "updated: 2026-11-12\n"
+            f"project_repo: {{ branch: main, head: {head}, pushed: false }}\n"
+            "state_repo: { branch: main, head: local-only, pushed: false }\n"
+            "---\n\n"
+            "# Current State\n\n## Goal\nParse it.\n\n"
+            "## Verification\n- `python -m unittest`: passed\n\n"
+            "## Next Action\nShip it.\n"
+        )
+        self.write_state(self.project, content)
+
+        result = self.validate(self.project)
+
+        self.assertNotIn("recorded project HEAD", result.stdout)
+        bad = content.replace(head, "0" * 40)
+        self.write_state(self.project, bad)
+        self.assertIn("recorded project HEAD", self.validate(self.project).stdout)
+
+    def test_utf8_bom_checkpoint_is_accepted(self) -> None:
+        # Windows editors and PowerShell 5 write a BOM before the front matter.
+        path = self.project / "skilluse" / "context" / "current.md"
+        path.write_text(
+            structured(project_head=self.head(self.project)), encoding="utf-8-sig"
+        )
+
+        result = self.validate(self.project, "--strict")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("legacy", result.stdout)
+
+    def test_broken_front_matter_is_an_error(self) -> None:
+        self.write_state(self.project, "---\nphase: 01-alpha\n\n# Current State\n")
+
+        result = self.validate(self.project)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("not terminated", result.stdout)
+
+    def test_missing_goal_heading_is_an_error(self) -> None:
+        content = structured(project_head=self.head(self.project)).replace("## Goal\n", "## Aim\n")
+        self.write_state(self.project, content)
+
+        result = self.validate(self.project)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("## Goal", result.stdout)
 
 
 if __name__ == "__main__":

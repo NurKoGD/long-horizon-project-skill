@@ -1,17 +1,26 @@
+---
+phase: 01-<slug>
+phase_file: plans/phases/01-<slug>.md
+status: in_progress
+updated: <YYYY-MM-DDTHH:MMZ>
+skill_version: {{skill_version}}
+project_repo:
+  branch: <branch>
+  head: <commit or working-tree state>
+  pushed: false
+state_repo:
+  branch: <branch>
+  head: <commit or local-only>
+  pushed: false
+---
+
 # Current State
 
-## Current Phase
-Phase 01: <name> - in_progress
-
-## Code Checkpoint
-Project repository: <branch>; HEAD: <commit or working-tree state>
-State repository: <branch and HEAD, or local-only>
+## Goal
+<one sentence: what this phase must achieve>
 
 ## Completed
-- <durable completed item>
-
-## Decisions
-- <decision and reason>
+- <durable completed item in this phase>
 
 ## Verification
 - `<command>`: <passed, failed, or not run>; <short evidence>

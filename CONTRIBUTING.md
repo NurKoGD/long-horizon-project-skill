@@ -31,8 +31,9 @@ Read `tests/README.md` and run the scenarios in an isolated temporary project. T
 - resume from a compact checkpoint;
 - preserve project files and existing state;
 - keep assistant artifacts under `skilluse/` when paths are configurable;
-- avoid starting the next phase automatically;
-- detect Git checkpoint mismatches;
+- avoid starting the next phase automatically, and capture out-of-scope work in `plans/backlog.md`;
+- record `blocked` with a reason instead of pretending a phase is complete;
+- detect Git checkpoint mismatches, missing phase files, and Skill version drift;
 - follow an existing project Git workflow without inventing a new one.
 
 Do not update the Skill solely because an agent produced a preferred wording. Change it when a realistic scenario demonstrates a missing or conflicting behavior.

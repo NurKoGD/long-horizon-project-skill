@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +37,18 @@ def run_git(path: Path, *args: str) -> str | None:
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def read_skill_version(skill_dir: Path) -> str:
+    version_file = skill_dir / "VERSION"
+    if not version_file.is_file():
+        return "unknown"
+    return read_text(version_file).strip() or "unknown"
+
+
+def render_template(skill_dir: Path, name: str, version: str) -> str:
+    text = read_text(skill_dir / "templates" / name)
+    return text.replace("{{skill_version}}", version)
 
 
 def append_bytes(path: Path, data: bytes) -> None:
@@ -119,14 +130,16 @@ def main() -> int:
 
     created: list[str] = []
     skipped: list[str] = []
+    version = read_skill_version(skill_dir)
     for source_name, destination in (
         ("current.md", state / "context" / "current.md"),
         ("decisions.md", state / "context" / "decisions.md"),
+        ("backlog.md", state / "plans" / "backlog.md"),
     ):
         if destination.exists():
             skipped.append(str(destination.relative_to(project)))
             continue
-        shutil.copyfile(skill_dir / "templates" / source_name, destination)
+        destination.write_text(render_template(skill_dir, source_name, version), encoding="utf-8")
         created.append(str(destination.relative_to(project)))
 
     project_root = run_git(project, "rev-parse", "--show-toplevel")
@@ -145,6 +158,7 @@ def main() -> int:
         except OSError:
             separate_state_repo = False
     print(f"project: {project}")
+    print(f"skill version: {version}")
     print(f"created: {', '.join(created) if created else 'none'}")
     print(f"preserved: {', '.join(skipped) if skipped else 'none'}")
     print(f"project git: {'available' if project_root else 'unavailable'}")

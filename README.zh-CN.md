@@ -26,6 +26,7 @@
 │   └── skills/
 │       └── long-horizon-project/
 │           ├── SKILL.md
+│           ├── VERSION
 │           ├── agents/openai.yaml
 │           ├── references/
 │           ├── scripts/
@@ -152,11 +153,27 @@ project/
     ├── context/
     │   ├── current.md
     │   └── decisions.md
-    ├── plans/phases/
+    ├── plans/
+    │   ├── backlog.md
+    │   └── phases/
     ├── logs/
     ├── artifacts/
-    └── local/
+    └── local/           # 被状态仓库忽略
 ```
+
+`current.md` 以一小段 front matter 开头，让检查点可以被机器校验：
+
+```yaml
+phase: 01-parse
+phase_file: plans/phases/01-parse.md
+status: in_progress        # in_progress | blocked | complete
+updated: 2026-11-12T00:40Z
+skill_version: 0.2.0
+project_repo: { branch: main, head: e1f5ed3, pushed: true }
+state_repo: { branch: main, head: 59f6712, pushed: true }
+```
+
+`blocked` 必须给出 `blocked_reason`；`complete` 要求 phase 文件里有验收标准、检查点里有验证证据。旧版的纯文字检查点仍可校验，但会提示迁移。
 
 项目交付物仍放在正常的项目目录中。可配置路径的计划、交接记录、报告、截图和日志放在 `skilluse/`。不要把密钥或机器专属绝对路径写入状态文件。
 

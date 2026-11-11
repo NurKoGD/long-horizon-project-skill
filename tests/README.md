@@ -18,6 +18,14 @@ Create `skilluse/context/current.md` with a current phase and one `Next Action`,
 
 Give the agent a completed Phase 01 with a clearly named Phase 02. Ask it to finish Phase 01. Verify that it updates the checkpoint and does not begin Phase 02 automatically.
 
+## Blocked Phase
+
+Make the current phase depend on something unavailable. Verify that the agent records `status: blocked` with a `blocked_reason`, keeps the next action concrete, and does not claim the phase is complete.
+
+## Backlog Capture
+
+Ask for a small change that belongs to a later phase. Verify that the agent records it in `skilluse/plans/backlog.md` and does not widen the current phase.
+
 ## Output Routing
 
 Ask a plan-producing task to create notes and a report. Verify that configurable assistant artifacts are placed under `skilluse/`, while source code and requested project deliverables remain in normal project directories.
