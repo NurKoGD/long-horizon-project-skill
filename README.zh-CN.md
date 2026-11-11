@@ -9,6 +9,7 @@
 ## 功能
 
 - 在 `skilluse/context/current.md` 中保存紧凑的项目 checkpoint。
+- 旁边保存可快速浏览的决策索引和环境事实（构建、测试命令）。
 - 将阶段计划、决策、日志和其他智能体辅助文件集中到 `skilluse/`。
 - 恢复项目时只读取当前阶段和必要的项目文件，减少 token 消耗。
 - 每个对话只处理一个阶段，不自动进入下一阶段。
@@ -137,7 +138,9 @@ python "<skill-directory>/scripts/init_skilluse.py" <project-path> --state-repo 
 python "<skill-directory>/scripts/validate_skilluse.py" <project-path> --strict
 ```
 
-错误始终导致失败；警告仅在加 `--strict` 时导致失败。本地单机场景（无远端，或 `skilluse/` 不是独立仓库）只作为提示输出，不影响退出码。
+错误始终导致失败；警告仅在加 `--strict` 时导致失败。本地单机场景（无远端，或 `skilluse/` 不是独立仓库）只作为提示输出，不影响退出码。加 `--json` 可输出单个机器可读对象。
+
+validator 还会报告：决策索引与日志不一致、决策日志超出预算、`logs/` 与 `artifacts/` 体积过大、`context/environment.md` 缺失或仍是模板。
 
 ## 项目状态目录
 
@@ -152,7 +155,8 @@ project/
 └── skilluse/            # 通常是独立的私有 Git 仓库
     ├── context/
     │   ├── current.md
-    │   └── decisions.md
+    │   ├── decisions.md
+    │   └── environment.md
     ├── plans/
     │   ├── backlog.md
     │   └── phases/
@@ -168,7 +172,7 @@ phase: 01-parse
 phase_file: plans/phases/01-parse.md
 status: in_progress        # in_progress | blocked | complete
 updated: 2026-11-12T00:40Z
-skill_version: 0.2.0
+skill_version: 0.3.0
 project_repo: { branch: main, head: e1f5ed3, pushed: true }
 state_repo: { branch: main, head: 59f6712, pushed: true }
 ```

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -32,7 +33,12 @@ UPDATED_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:?\d{2})?)?$"
 )
 PLACEHOLDER_RE = re.compile(r"<[^<>\n]+>")
+DECISION_ENTRY_RE = re.compile(
+    r"^###\s+(\d{4}-\d{2}-\d{2})\s*[-\u2013\u2014]\s*(.+?)\s*$", re.MULTILINE
+)
 WORD_BUDGET = 500
+DECISION_CAP = 40
+STATE_SIZE_BUDGET = 25 * 1024 * 1024
 
 # Git writes paths as UTF-8 bytes. Decoding with the platform locale (for
 # example cp936 on a Chinese Windows install) raises UnicodeDecodeError inside
@@ -190,17 +196,112 @@ def normalise(token: str) -> str:
     return " ".join(token.strip().lower().split())
 
 
-def template_placeholders(skill_dir: Path) -> set[str]:
-    """Collect the placeholder tokens the shipped template uses.
+def template_placeholders(skill_dir: Path, name: str = "current.md") -> set[str]:
+    """Collect the placeholder tokens one shipped template uses.
 
     Deriving the set from the template keeps this check accurate: angle
     brackets in real content such as ``IReadOnlyList<Item>`` are not flagged.
     """
-    template = skill_dir / "templates" / "current.md"
+    template = skill_dir / "templates" / name
     if not template.is_file():
         return set()
     text = read_text(template)
     return {normalise(match.group(0)) for match in PLACEHOLDER_RE.finditer(text)}
+
+
+def check_placeholders(
+    content: str, skill_dir: Path, name: str, report: Report, level: str = "warn"
+) -> None:
+    found = sorted(
+        {
+            match.group(0)
+            for match in PLACEHOLDER_RE.finditer(content)
+            if normalise(match.group(0)) in template_placeholders(skill_dir, name)
+        }
+    )
+    if found:
+        preview = ", ".join(found[:5])
+        message = f"{name} still contains template placeholders: {preview}"
+        if level == "note":
+            report.notes.append(message)
+        else:
+            report.warnings.append(message)
+
+
+def check_decisions(skilluse: Path, skill_dir: Path, report: Report) -> None:
+    path = skilluse / "context" / "decisions.md"
+    if not path.is_file():
+        return
+    content = read_text(path)
+    entries = [match.group(2) for match in DECISION_ENTRY_RE.finditer(content)]
+    index = extract_section(content, "## Index")
+    rows: list[str] = []
+    for line in index.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in stripped.strip("|").split("|")]
+        if len(cells) < 2 or set(cells[0]) <= {"-", ":"} or cells[0].lower() == "date":
+            continue
+        rows.append(cells[1])
+    if not index.strip():
+        report.notes.append("decisions.md has no ## Index; add one so the log stays scannable")
+    else:
+        missing = [entry for entry in entries if normalise(entry) not in {normalise(row) for row in rows}]
+        extra = [
+            row
+            for row in rows
+            if normalise(row) not in {normalise(entry) for entry in entries}
+            and normalise(row) not in template_placeholders(skill_dir, "decisions.md")
+        ]
+        if missing:
+            preview = "; ".join(missing[:3])
+            report.warnings.append(
+                f"decisions.md index is missing {len(missing)} entr(y/ies): {preview}"
+            )
+        if extra:
+            preview = "; ".join(extra[:3])
+            report.warnings.append(
+                f"decisions.md index lists {len(extra)} entr(y/ies) absent from the log: {preview}"
+            )
+    if len(entries) > DECISION_CAP:
+        report.warnings.append(
+            f"decisions.md has {len(entries)} entries, over the {DECISION_CAP}-entry budget; "
+            "archive settled decisions and keep the index pointing at active ones"
+        )
+
+
+def check_environment(skilluse: Path, skill_dir: Path, report: Report) -> None:
+    path = skilluse / "context" / "environment.md"
+    if not path.is_file():
+        report.notes.append(
+            "no context/environment.md; build and test commands are rediscovered each time"
+        )
+        return
+    content = read_text(path)
+    if not content.strip():
+        report.warnings.append("context/environment.md is empty")
+        return
+    check_placeholders(content, skill_dir, "environment.md", report, level="note")
+
+
+def check_state_size(skilluse: Path, report: Report) -> None:
+    total = 0
+    for name in ("logs", "artifacts"):
+        directory = skilluse / name
+        if not directory.is_dir():
+            continue
+        for path in directory.rglob("*"):
+            if path.is_file():
+                try:
+                    total += path.stat().st_size
+                except OSError:
+                    continue
+    if total > STATE_SIZE_BUDGET:
+        report.warnings.append(
+            f"logs and artifacts hold {total / (1024 * 1024):.1f} MB; archive or delete finished phases "
+            "so the state repository stays cheap to clone"
+        )
 
 
 def installed_version(skill_dir: Path) -> str:
@@ -313,6 +414,11 @@ def main() -> int:
         action="store_true",
         help="return failure for warnings as well; errors always return failure",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="print the result as one JSON object instead of text lines",
+    )
     args = parser.parse_args()
 
     project = Path(args.project).expanduser().resolve()
@@ -337,19 +443,13 @@ def main() -> int:
                 f"current.md is {words} words, over the {WORD_BUDGET}-word context budget; "
                 "move finished items into the phase file"
             )
-        placeholders = template_placeholders(skill_dir)
-        found = sorted(
-            {
-                match.group(0)
-                for match in PLACEHOLDER_RE.finditer(content)
-                if normalise(match.group(0)) in placeholders
-            }
-        )
-        if found:
-            preview = ", ".join(found[:5])
-            report.warnings.append(f"current.md still contains template placeholders: {preview}")
+        check_placeholders(content, skill_dir, "current.md", report)
 
     recorded_project, recorded_state = check_state_content(content, state, skill_dir, report)
+    if state.is_dir():
+        check_decisions(state, skill_dir, report)
+        check_environment(state, skill_dir, report)
+        check_state_size(state, report)
 
     project_ok, project_root = git(project, "rev-parse", "--show-toplevel")
     project_head = ""
@@ -403,6 +503,22 @@ def main() -> int:
             f"recorded state HEAD {recorded_state} does not match current HEAD {state_head}"
         )
 
+    failed = bool(report.errors or (args.strict and report.warnings))
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "ok": not failed,
+                    "project": str(project),
+                    "errors": report.errors,
+                    "warnings": report.warnings,
+                    "notes": report.notes,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 1 if failed else 0
+
     for item in report.errors:
         print(f"ERROR: {item}")
     for item in report.warnings:
@@ -418,7 +534,7 @@ def main() -> int:
             f"{len(report.notes)} note(s)"
         )
 
-    return 1 if report.errors or (args.strict and report.warnings) else 0
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

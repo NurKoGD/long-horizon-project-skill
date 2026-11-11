@@ -9,6 +9,7 @@ This repository is the distributable source package. The reusable skill lives un
 ## What It Does
 
 - Keeps a compact checkpoint in `skilluse/context/current.md`.
+- Keeps a scannable decision index and durable build/test facts next to it.
 - Organizes phase plans, decisions, logs, and other assistant artifacts under `skilluse/`.
 - Loads only the current phase and relevant project files when resuming.
 - Keeps one phase per conversation and does not start the next phase automatically.
@@ -126,7 +127,9 @@ Validate the state before handoff:
 python "<skill-directory>/scripts/validate_skilluse.py" <project-path> --strict
 ```
 
-Errors always fail the check. Warnings fail only with `--strict`. Local-only setups (no remote, or `skilluse/` is not a separate repository) are reported as notes and never change the exit code.
+Errors always fail the check. Warnings fail only with `--strict`. Local-only setups (no remote, or `skilluse/` is not a separate repository) are reported as notes and never change the exit code. Add `--json` for a single machine-readable object instead of text lines.
+
+The validator also reports decision-index drift, an over-long decision log, oversized `logs/` and `artifacts/`, and a missing or still-unfilled `context/environment.md`.
 
 ## Project State
 
@@ -141,7 +144,8 @@ project/
 └── skilluse/            # usually a separate private Git repository
     ├── context/
     │   ├── current.md
-    │   └── decisions.md
+    │   ├── decisions.md
+    │   └── environment.md
     ├── plans/
     │   ├── backlog.md
     │   └── phases/
@@ -157,7 +161,7 @@ phase: 01-parse
 phase_file: plans/phases/01-parse.md
 status: in_progress        # in_progress | blocked | complete
 updated: 2026-11-12T00:40Z
-skill_version: 0.2.0
+skill_version: 0.3.0
 project_repo: { branch: main, head: e1f5ed3, pushed: true }
 state_repo: { branch: main, head: 59f6712, pushed: true }
 ```

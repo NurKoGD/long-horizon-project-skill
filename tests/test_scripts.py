@@ -7,6 +7,7 @@ Run from the repository root:
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -187,21 +188,26 @@ class InitTests(ScriptTestCase):
 
     def test_preserves_existing_state(self) -> None:
         project = self.make_project()
-        self.write_state(project, "# Current State\n\nhand written\n")
-        decisions = project / "skilluse" / "context" / "decisions.md"
-        decisions.write_text("# Decisions\n\nhand written\n", encoding="utf-8")
-        backlog = project / "skilluse" / "plans" / "backlog.md"
-        backlog.parent.mkdir(parents=True, exist_ok=True)
-        backlog.write_text("# Backlog\n\nhand written\n", encoding="utf-8")
+        targets = {
+            "context/current.md": "# Current State\n\nhand written\n",
+            "context/decisions.md": "# Decisions\n\nhand written\n",
+            "context/environment.md": "# Environment\n\nhand written\n",
+            "plans/backlog.md": "# Backlog\n\nhand written\n",
+        }
+        for relative, text in targets.items():
+            path = project / "skilluse" / relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
 
         result = self.init(project)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            (project / "skilluse" / "context" / "current.md").read_text(encoding="utf-8"),
-            "# Current State\n\nhand written\n",
-        )
-        self.assertIn("hand written", decisions.read_text(encoding="utf-8"))
+        for relative, text in targets.items():
+            self.assertEqual(
+                (project / "skilluse" / relative).read_text(encoding="utf-8"),
+                text,
+                relative,
+            )
         self.assertIn("created: none", result.stdout)
 
     def test_gitignore_is_idempotent(self) -> None:
@@ -336,7 +342,7 @@ class ValidateTests(ScriptTestCase):
 
         result = self.validate(project)
 
-        self.assertNotIn("placeholder", result.stdout)
+        self.assertNotIn("current.md still contains template placeholders", result.stdout)
 
     def test_template_placeholders_are_reported(self) -> None:
         project = self.make_project()
@@ -555,6 +561,132 @@ class StructuredCheckpointTests(ScriptTestCase):
 
         self.assertEqual(result.returncode, 1)
         self.assertIn("## Goal", result.stdout)
+
+
+def decisions_doc(entries: list[str], index_rows: list[str] | None = None) -> str:
+    rows = entries if index_rows is None else index_rows
+    lines = [
+        "# Decisions",
+        "",
+        "## Index",
+        "",
+        "| Date | Decision | Phase | Status |",
+        "|---|---|---|---|",
+    ]
+    lines += [f"| 2026-11-12 | {title} | 01-alpha | active |" for title in rows]
+    lines += ["", "## Decision Log", ""]
+    for title in entries:
+        lines += [f"### 2026-11-12 - {title}", "", "- Decision: x", "- Reason: y", "- Consequence: z", ""]
+    return "\n".join(lines)
+
+
+class StateHygieneTests(ScriptTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.project = self.make_project()
+        self.init(self.project)
+        self.commit_gitignore(self.project)
+        self.state = self.project / "skilluse"
+        self.phase = self.state / "plans" / "phases" / "01-alpha.md"
+        self.phase.parent.mkdir(parents=True, exist_ok=True)
+        self.phase.write_text(
+            "# Phase 01: alpha\n\n## Scope\nParse it.\n\n## Acceptance Criteria\n- parses a file\n",
+            encoding="utf-8",
+        )
+        self.write_state(self.project, structured(project_head=self.head(self.project)))
+
+    def write(self, relative: str, content: str) -> None:
+        path = self.state / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    def test_decisions_index_in_sync_is_clean(self) -> None:
+        self.write("context/decisions.md", decisions_doc(["Use front matter", "Keep backlog"]))
+
+        result = self.validate(self.project)
+
+        self.assertNotIn("decisions.md index", result.stdout)
+
+    def test_decisions_index_missing_entry_warns(self) -> None:
+        self.write(
+            "context/decisions.md",
+            decisions_doc(["Use front matter", "Keep backlog"], index_rows=["Use front matter"]),
+        )
+
+        result = self.validate(self.project)
+
+        self.assertIn("index is missing 1 entr", result.stdout)
+
+    def test_decisions_index_extra_entry_warns(self) -> None:
+        self.write(
+            "context/decisions.md",
+            decisions_doc(["Use front matter"], index_rows=["Use front matter", "Ghost decision"]),
+        )
+
+        result = self.validate(self.project)
+
+        self.assertIn("absent from the log", result.stdout)
+
+    def test_decisions_without_index_is_noted(self) -> None:
+        self.write("context/decisions.md", "# Decisions\n\n### 2026-11-12 - No index\n")
+
+        result = self.validate(self.project)
+
+        self.assertIn("no ## Index", result.stdout)
+        self.assertNotIn("WARN", result.stdout)
+
+    def test_decisions_over_cap_warns(self) -> None:
+        self.write("context/decisions.md", decisions_doc([f"Decision {i}" for i in range(41)]))
+
+        result = self.validate(self.project)
+
+        self.assertIn("over the 40-entry budget", result.stdout)
+
+    def test_missing_environment_is_noted(self) -> None:
+        (self.state / "context" / "environment.md").unlink()
+
+        result = self.validate(self.project)
+
+        self.assertIn("no context/environment.md", result.stdout)
+
+    def test_environment_placeholders_are_advisory(self) -> None:
+        self.write("context/environment.md", "# Environment\n\n- test: `<command>`\n")
+
+        result = self.validate(self.project)
+
+        self.assertIn("environment.md still contains template placeholders", result.stdout)
+        self.assertNotIn("WARN", result.stdout)
+
+    def test_empty_environment_warns(self) -> None:
+        self.write("context/environment.md", "   \n")
+
+        result = self.validate(self.project)
+
+        self.assertIn("environment.md is empty", result.stdout)
+
+    def test_oversized_logs_warn(self) -> None:
+        big = self.state / "logs" / "big.log"
+        big.parent.mkdir(parents=True, exist_ok=True)
+        with big.open("wb") as handle:
+            handle.seek(26 * 1024 * 1024)
+            handle.write(b"x")
+
+        result = self.validate(self.project)
+
+        self.assertIn("MB", result.stdout)
+        self.assertIn("stays cheap to clone", result.stdout)
+
+    def test_json_output_is_a_single_object(self) -> None:
+        self.write("context/decisions.md", decisions_doc(["Use front matter"]))
+
+        result = self.validate(self.project, "--json")
+
+        payload = json.loads(result.stdout)
+        self.assertIn("ok", payload)
+        self.assertIsInstance(payload["errors"], list)
+        self.assertIsInstance(payload["warnings"], list)
+        self.assertIsInstance(payload["notes"], list)
+        self.assertEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

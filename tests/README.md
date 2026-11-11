@@ -26,6 +26,10 @@ Make the current phase depend on something unavailable. Verify that the agent re
 
 Ask for a small change that belongs to a later phase. Verify that the agent records it in `skilluse/plans/backlog.md` and does not widen the current phase.
 
+## Decision Index
+
+Record two decisions. Verify that both appear in the `## Index` table of `decisions.md`, and that a later conversation reads the index before the full log.
+
 ## Output Routing
 
 Ask a plan-producing task to create notes and a report. Verify that configurable assistant artifacts are placed under `skilluse/`, while source code and requested project deliverables remain in normal project directories.

@@ -1,6 +1,12 @@
 # Decisions
 
-Record only durable decisions that affect future work. Link to the relevant phase or commit when useful.
+Record only durable decisions that affect future work. Keep the index in sync with the log; the validator warns when they drift.
+
+## Index
+
+| Date | Decision | Phase | Status |
+|---|---|---|---|
+| <YYYY-MM-DD> | <decision title> | <phase> | active |
 
 ## Decision Log
 

@@ -134,6 +134,7 @@ def main() -> int:
     for source_name, destination in (
         ("current.md", state / "context" / "current.md"),
         ("decisions.md", state / "context" / "decisions.md"),
+        ("environment.md", state / "context" / "environment.md"),
         ("backlog.md", state / "plans" / "backlog.md"),
     ):
         if destination.exists():
