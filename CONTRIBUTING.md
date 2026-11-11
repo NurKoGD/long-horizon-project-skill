@@ -15,12 +15,14 @@ Do not commit a project's `skilluse/` directory to this repository. That directo
 Run these checks from the repository root before committing:
 
 ```bash
-python <path-to-quick_validate.py> .agents/skills/long-horizon-project
+python -m unittest discover -s tests -v
 python -m py_compile .agents/skills/long-horizon-project/scripts/init_skilluse.py .agents/skills/long-horizon-project/scripts/validate_skilluse.py
 git diff --check
 ```
 
-The Codex quick validator is normally available from the local Codex installation at `~/.codex/skills/.system/skill-creator/scripts/quick_validate.py`. Claude Code users should use the equivalent Agent Skills validator or inspect the required `SKILL.md` frontmatter manually.
+`tests/test_scripts.py` runs the scripts against throwaway Git repositories and covers the regressions that matter most: non-ASCII project paths and file names, first-run versus repeat initialization, Git checkpoint parsing, placeholder detection, and the `--strict` exit codes. It needs only the standard library and a working `git`.
+
+On Windows, run the tests with a real interpreter: the `python` App Execution Alias in `WindowsApps` is a stub that exits without running anything. Host-specific validators such as Codex's `quick_validate.py` are optional extras, not requirements for this repository.
 
 ## Behavioral Testing
 

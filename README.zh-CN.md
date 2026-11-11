@@ -31,7 +31,9 @@
 │           ├── scripts/
 │           └── templates/
 ├── tests/
-│   └── README.md
+│   ├── README.md
+│   └── test_scripts.py
+├── .github/workflows/ci.yml
 ├── CONTRIBUTING.md
 ├── README.md
 ├── README.zh-CN.md
@@ -133,6 +135,8 @@ python "<skill-directory>/scripts/init_skilluse.py" <project-path> --state-repo 
 ```text
 python "<skill-directory>/scripts/validate_skilluse.py" <project-path> --strict
 ```
+
+错误始终导致失败；警告仅在加 `--strict` 时导致失败。本地单机场景（无远端，或 `skilluse/` 不是独立仓库）只作为提示输出，不影响退出码。
 
 ## 项目状态目录
 

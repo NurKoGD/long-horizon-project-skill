@@ -9,6 +9,16 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Git writes paths as UTF-8 bytes. Decoding with the platform locale (for
+# example cp936 on a Chinese Windows install) raises UnicodeDecodeError inside
+# the subprocess reader thread and leaves stdout as None, so both the encoding
+# and the None case are handled explicitly.
+GIT_ENCODING = "utf-8"
+GIT_ERRORS = "replace"
+
+IGNORE_LINES = {"/skilluse/", "skilluse/", "/skilluse"}
+STATE_IGNORE = "local/\n"
+
 
 def run_git(path: Path, *args: str) -> str | None:
     try:
@@ -16,27 +26,47 @@ def run_git(path: Path, *args: str) -> str | None:
             ["git", "-C", str(path), *args],
             check=False,
             capture_output=True,
-            text=True,
+            encoding=GIT_ENCODING,
+            errors=GIT_ERRORS,
         )
-    except OSError:
+    except (OSError, ValueError):
         return None
     if result.returncode != 0:
         return None
-    return result.stdout.strip()
+    return (result.stdout or "").strip()
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8", errors="replace")
+
+
+def append_bytes(path: Path, data: bytes) -> None:
+    existing = path.read_bytes() if path.exists() else b""
+    with path.open("ab") as handle:
+        if existing and not existing.endswith((b"\n", b"\r")):
+            handle.write(b"\n")
+        handle.write(data)
 
 
 def ensure_ignore(project: Path) -> str:
     gitignore = project / ".gitignore"
-    existing = gitignore.read_text(encoding="utf-8") if gitignore.exists() else ""
-    lines = existing.splitlines()
-    if "/skilluse/" not in lines:
-        content = existing
-        if content and not content.endswith(("\n", "\r")):
-            content += "\n"
-        content += "/skilluse/\n"
-        gitignore.write_text(content, encoding="utf-8")
-        return "added /skilluse/ to .gitignore"
-    return "/skilluse/ already present in .gitignore"
+    existing = read_text(gitignore) if gitignore.exists() else ""
+    lines = {line.strip() for line in existing.splitlines()}
+    if lines & IGNORE_LINES:
+        return "/skilluse/ already present in .gitignore"
+    append_bytes(gitignore, b"/skilluse/\n")
+    return "added /skilluse/ to .gitignore"
+
+
+def ensure_state_ignore(state: Path) -> str:
+    """Keep machine-specific state out of the private state repository."""
+    gitignore = state / ".gitignore"
+    existing = read_text(gitignore) if gitignore.exists() else ""
+    lines = {line.strip() for line in existing.splitlines()}
+    if lines & {"local/", "/local/", "/local"}:
+        return "local/ already ignored"
+    append_bytes(gitignore, STATE_IGNORE.encode("utf-8"))
+    return "added local/ to skilluse/.gitignore"
 
 
 def main() -> int:
@@ -65,9 +95,10 @@ def main() -> int:
                     ["git", "clone", args.state_repo, str(state)],
                     check=False,
                     capture_output=True,
-                    text=True,
+                    encoding=GIT_ENCODING,
+                    errors=GIT_ERRORS,
                 )
-            except OSError:
+            except (OSError, ValueError):
                 print("error: could not run git clone", file=sys.stderr)
                 return 2
             if result.returncode != 0:
@@ -100,8 +131,11 @@ def main() -> int:
 
     project_root = run_git(project, "rev-parse", "--show-toplevel")
     ignore_result = "not a Git repository"
+    ignore_added = False
     if project_root:
         ignore_result = ensure_ignore(project)
+        ignore_added = ignore_result.startswith("added")
+    state_ignore_result = ensure_state_ignore(state)
 
     state_root = run_git(state, "rev-parse", "--show-toplevel")
     separate_state_repo = False
@@ -115,9 +149,12 @@ def main() -> int:
     print(f"preserved: {', '.join(skipped) if skipped else 'none'}")
     print(f"project git: {'available' if project_root else 'unavailable'}")
     print(f"gitignore: {ignore_result}")
+    print(f"state gitignore: {state_ignore_result}")
     print(f"state git: {'separate repository' if separate_state_repo else 'not a separate repository'}")
     if args.state_repo and state_exists and not state_empty:
         print("state repo URL: existing skilluse content preserved; clone skipped")
+    if ignore_added:
+        print("note: commit .gitignore so the validator stops reporting uncommitted changes")
     print("next: review skilluse/context/current.md and create the current phase file")
     return 0
 

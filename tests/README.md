@@ -1,6 +1,14 @@
 # Skill Evaluation Scenarios
 
-Run these scenarios in a temporary Git project. Do not use a real project or a real private state repository for evaluation.
+## Automated Tests
+
+`test_scripts.py` exercises both bundled scripts against temporary Git repositories. It needs Python 3.10+ and `git`, nothing else:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Run these scenarios in a temporary Git project for the parts that only an agent can evaluate. Do not use a real project or a real private state repository for evaluation.
 
 ## Resume And Token Discipline
 

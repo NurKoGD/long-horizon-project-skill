@@ -1,0 +1,332 @@
+"""Regression tests for the bundled long-horizon-project scripts.
+
+Run from the repository root:
+
+    python -m unittest discover -s tests -v
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+SKILL_DIR = ROOT / ".agents" / "skills" / "long-horizon-project"
+INIT = SKILL_DIR / "scripts" / "init_skilluse.py"
+VALIDATE = SKILL_DIR / "scripts" / "validate_skilluse.py"
+GIT = shutil.which("git")
+
+
+def checkpoint(
+    project_head: str = "",
+    state_head: str = "",
+    verification: str = "- `python -m unittest`: passed",
+    next_action: str = "Write the parser.",
+    state_first: bool = False,
+) -> str:
+    project_line = f"Project repository: main; HEAD: {project_head}".rstrip()
+    state_line = f"State repository: main; HEAD: {state_head}".rstrip()
+    checkpoint_lines = [state_line, project_line] if state_first else [project_line, state_line]
+    return "\n".join(
+        [
+            "# Current State",
+            "",
+            "## Current Phase",
+            "Phase 01: alpha - in_progress",
+            "",
+            "## Code Checkpoint",
+            *checkpoint_lines,
+            "",
+            "## Verification",
+            verification,
+            "",
+            "## Next Action",
+            next_action,
+            "",
+        ]
+    )
+
+
+class ScriptTestCase(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.mkdtemp(prefix="lhp-test-")
+        self.addCleanup(shutil.rmtree, self._tmp, True)
+        self.root = Path(self._tmp)
+
+    # -- helpers ---------------------------------------------------------
+    def git(self, cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [GIT, "-C", str(cwd), "-c", "user.name=t", "-c", "user.email=t@example.com", *args],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=True,
+        )
+
+    def head(self, cwd: Path) -> str:
+        return self.git(cwd, "rev-parse", "HEAD").stdout.strip()
+
+    def run_script(self, script: Path, project: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        # PYTHONUTF8 is deliberately left unset so the child keeps the platform
+        # locale. On a Chinese Windows install that is cp936, which is exactly
+        # the condition that used to crash the scripts on non-ASCII paths.
+        env = dict(os.environ, PYTHONIOENCODING="utf-8")
+        env.pop("PYTHONUTF8", None)
+        return subprocess.run(
+            [sys.executable, str(script), str(project), *args],
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+        )
+
+    def init(self, project: Path) -> subprocess.CompletedProcess[str]:
+        return self.run_script(INIT, project)
+
+    def validate(self, project: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        return self.run_script(VALIDATE, project, *args)
+
+    def make_project(self, name: str = "project", commit: bool = True) -> Path:
+        project = self.root / name
+        project.mkdir(parents=True, exist_ok=True)
+        self.git(project, "init", "-q", ".")
+        (project / "README.md").write_text("# demo\n", encoding="utf-8")
+        if commit:
+            self.git(project, "add", "-A")
+            self.git(project, "commit", "-qm", "init")
+        return project
+
+    def write_state(self, project: Path, text: str) -> None:
+        target = project / "skilluse" / "context" / "current.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+
+    def commit_gitignore(self, project: Path) -> None:
+        self.git(project, "add", "-A")
+        self.git(project, "commit", "-qm", "ignored state")
+
+    def assertNoTraceback(self, result: subprocess.CompletedProcess[str]) -> None:
+        self.assertNotIn("Traceback", result.stderr, result.stderr)
+
+
+@unittest.skipUnless(GIT, "git is required for these tests")
+class InitTests(ScriptTestCase):
+    def test_creates_state_workspace_and_ignores(self) -> None:
+        project = self.make_project()
+
+        result = self.init(project)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNoTraceback(result)
+        self.assertTrue((project / "skilluse" / "context" / "current.md").is_file())
+        self.assertTrue((project / "skilluse" / "context" / "decisions.md").is_file())
+        for name in ("plans", "logs", "artifacts", "local"):
+            self.assertTrue((project / "skilluse" / name).is_dir(), name)
+        self.assertIn("/skilluse/", (project / ".gitignore").read_text(encoding="utf-8").splitlines())
+        self.assertIn("local/", (project / "skilluse" / ".gitignore").read_text(encoding="utf-8").splitlines())
+
+    def test_preserves_existing_state(self) -> None:
+        project = self.make_project()
+        self.write_state(project, "# Current State\n\nhand written\n")
+        decisions = project / "skilluse" / "context" / "decisions.md"
+        decisions.write_text("# Decisions\n\nhand written\n", encoding="utf-8")
+
+        result = self.init(project)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            (project / "skilluse" / "context" / "current.md").read_text(encoding="utf-8"),
+            "# Current State\n\nhand written\n",
+        )
+        self.assertIn("hand written", decisions.read_text(encoding="utf-8"))
+        self.assertIn("created: none", result.stdout)
+
+    def test_gitignore_is_idempotent(self) -> None:
+        project = self.make_project()
+
+        self.init(project)
+        result = self.init(project)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        lines = (project / ".gitignore").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(lines.count("/skilluse/"), 1)
+
+    def test_recognises_unprefixed_gitignore_entry(self) -> None:
+        project = self.make_project()
+        (project / ".gitignore").write_text("skilluse/\n", encoding="utf-8")
+
+        result = self.init(project)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((project / ".gitignore").read_text(encoding="utf-8"), "skilluse/\n")
+
+    def test_survives_non_ascii_project_path(self) -> None:
+        project = self.make_project("项目目录")
+
+        result = self.init(project)
+
+        self.assertNoTraceback(result)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue((project / "skilluse" / "context" / "current.md").is_file())
+
+    def test_clones_state_repository_when_absent(self) -> None:
+        seed = self.root / "state-seed"
+        (seed / "context").mkdir(parents=True)
+        self.git(seed, "init", "-q", ".")
+        (seed / "context" / "current.md").write_text("# Current State\n\nseeded\n", encoding="utf-8")
+        (seed / "local").mkdir()
+        self.git(seed, "add", "-A")
+        self.git(seed, "commit", "-qm", "seed state")
+
+        project = self.make_project()
+        cloned = self.run_script(INIT, project, "--state-repo", str(seed))
+
+        self.assertEqual(cloned.returncode, 0, cloned.stderr)
+        self.assertNoTraceback(cloned)
+        self.assertIn("state git: separate repository", cloned.stdout)
+        self.assertEqual(
+            (project / "skilluse" / "context" / "current.md").read_text(encoding="utf-8"),
+            "# Current State\n\nseeded\n",
+        )
+        self.assertIn("local/", (project / "skilluse" / ".gitignore").read_text(encoding="utf-8"))
+
+
+@unittest.skipUnless(GIT, "git is required for these tests")
+class ValidateTests(ScriptTestCase):
+    def test_missing_state_is_an_error(self) -> None:
+        project = self.make_project()
+
+        result = self.validate(project)
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("ERROR", result.stdout)
+
+    def test_complete_local_checkpoint_passes_strict(self) -> None:
+        project = self.make_project()
+        self.init(project)
+        self.commit_gitignore(project)
+        self.write_state(project, checkpoint(project_head=self.head(project)))
+
+        result = self.validate(project, "--strict")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("WARN", result.stdout)
+        self.assertIn("OK", result.stdout)
+
+    def test_detects_project_head_mismatch(self) -> None:
+        project = self.make_project()
+        self.init(project)
+        self.commit_gitignore(project)
+        self.write_state(project, checkpoint(project_head="0" * 40))
+
+        result = self.validate(project, "--strict")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("recorded project HEAD", result.stdout)
+
+    def test_state_hash_first_does_not_break_project_check(self) -> None:
+        project = self.make_project()
+        self.init(project)
+        self.commit_gitignore(project)
+        state = project / "skilluse"
+        self.git(state, "init", "-q", ".")
+        self.git(state, "add", "-A")
+        self.git(state, "commit", "-qm", "state")
+        self.write_state(
+            project,
+            checkpoint(project_head=self.head(project), state_head=self.head(state), state_first=True),
+        )
+
+        result = self.validate(project)
+
+        self.assertNotIn("recorded project HEAD", result.stdout)
+
+    def test_detects_state_head_mismatch(self) -> None:
+        project = self.make_project()
+        self.init(project)
+        self.commit_gitignore(project)
+        state = project / "skilluse"
+        self.git(state, "init", "-q", ".")
+        self.git(state, "add", "-A")
+        self.git(state, "commit", "-qm", "state")
+        self.write_state(
+            project,
+            checkpoint(project_head=self.head(project), state_head="abc1234"),
+        )
+
+        result = self.validate(project)
+
+        self.assertIn("recorded state HEAD", result.stdout)
+
+    def test_generic_angle_brackets_are_not_placeholders(self) -> None:
+        project = self.make_project()
+        self.init(project)
+        self.commit_gitignore(project)
+        self.write_state(
+            project,
+            checkpoint(
+                project_head=self.head(project),
+                verification="- `dotnet test`: passed; returns `IReadOnlyList<Item>` and emits `<br>`",
+                next_action="Wire the `<Item>` serializer into the CLI.",
+            ),
+        )
+
+        result = self.validate(project)
+
+        self.assertNotIn("placeholder", result.stdout)
+
+    def test_template_placeholders_are_reported(self) -> None:
+        project = self.make_project()
+        self.init(project)
+        self.commit_gitignore(project)
+        self.write_state(project, checkpoint(project_head="<commit or working-tree state>"))
+
+        result = self.validate(project)
+
+        self.assertIn("template placeholders", result.stdout)
+
+    def test_word_budget_is_reported(self) -> None:
+        project = self.make_project()
+        self.init(project)
+        self.commit_gitignore(project)
+        verbose = "- " + " ".join(f"item{i}" for i in range(600))
+        self.write_state(project, checkpoint(project_head=self.head(project), verification=verbose))
+
+        result = self.validate(project, "--strict")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("context budget", result.stdout)
+
+    def test_survives_non_ascii_dirty_path(self) -> None:
+        project = self.make_project()
+        self.git(project, "config", "core.quotepath", "false")
+        self.init(project)
+        (project / "翻译草稿-🚀.md").write_text("x", encoding="utf-8")
+
+        result = self.validate(project)
+
+        self.assertNoTraceback(result)
+        self.assertIn(result.returncode, (0, 1))
+        self.assertNotIn("AttributeError", result.stderr)
+
+    def test_toplevel_gitignore_covers_monorepo_subproject(self) -> None:
+        mono = self.make_project("mono")
+        (mono / ".gitignore").write_text("**/skilluse/\n", encoding="utf-8")
+        self.git(mono, "add", "-A")
+        self.git(mono, "commit", "-qm", "ignore nested state")
+        project = mono / "app"
+        project.mkdir()
+        self.write_state(project, checkpoint(project_head=self.head(mono)))
+
+        result = self.validate(project)
+
+        self.assertNotIn(".gitignore entry", result.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

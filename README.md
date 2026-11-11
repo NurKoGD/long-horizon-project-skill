@@ -31,7 +31,9 @@ The skill does not migrate chat transcripts, create conversations, choose a Git 
 │           ├── scripts/
 │           └── templates/
 ├── tests/
-│   └── README.md
+│   ├── README.md
+│   └── test_scripts.py
+├── .github/workflows/ci.yml
 ├── CONTRIBUTING.md
 ├── README.md
 └── .gitignore
@@ -122,6 +124,8 @@ Validate the state before handoff:
 ```text
 python "<skill-directory>/scripts/validate_skilluse.py" <project-path> --strict
 ```
+
+Errors always fail the check. Warnings fail only with `--strict`. Local-only setups (no remote, or `skilluse/` is not a separate repository) are reported as notes and never change the exit code.
 
 ## Project State
 
