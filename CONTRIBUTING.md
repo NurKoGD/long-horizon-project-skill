@@ -22,6 +22,8 @@ git diff --check
 
 `tests/test_scripts.py` runs the scripts against throwaway Git repositories and covers the regressions that matter most: non-ASCII project paths and file names, first-run versus repeat initialization, Git checkpoint parsing, placeholder detection, and the `--strict` exit codes. It needs only the standard library and a working `git`.
 
+The same file also guards the document layer: `SKILL.md` must stay within 800 words, every file under `templates/` and `references/` must be referenced from it, and `VERSION` must be semver. Move detail into `references/` rather than growing the always-loaded file.
+
 On Windows, run the tests with a real interpreter: the `python` App Execution Alias in `WindowsApps` is a stub that exits without running anything. Host-specific validators such as Codex's `quick_validate.py` are optional extras, not requirements for this repository.
 
 ## Behavioral Testing

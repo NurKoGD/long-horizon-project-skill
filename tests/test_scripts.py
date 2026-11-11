@@ -689,5 +689,46 @@ class StateHygieneTests(ScriptTestCase):
         self.assertEqual(result.returncode, 0)
 
 
+class SkillDocumentTests(unittest.TestCase):
+    """Keep the always-loaded skill file small and its deferred resources discoverable."""
+
+    def setUp(self) -> None:
+        self.skill = (SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+        self.lines = self.skill.splitlines()
+
+    def test_skill_md_stays_within_budget(self) -> None:
+        words = len(self.skill.split())
+
+        self.assertLessEqual(words, 800, f"SKILL.md is {words} words; move detail into references/")
+
+    def test_front_matter_is_valid(self) -> None:
+        self.assertEqual(self.lines[0].strip(), "---")
+        closing = self.lines.index("---", 1)
+        header = "\n".join(self.lines[1:closing])
+
+        self.assertIn("name: long-horizon-project", header)
+        self.assertRegex(header, r"description: \S")
+
+    def test_every_deferred_resource_is_referenced(self) -> None:
+        resources = sorted(
+            path.name
+            for directory in ("templates", "references")
+            for path in (SKILL_DIR / directory).iterdir()
+            if path.is_file()
+        )
+        unreferenced = [name for name in resources if name not in self.skill]
+
+        self.assertEqual(
+            unreferenced,
+            [],
+            "SKILL.md never points at these resources, so an agent cannot find them",
+        )
+
+    def test_version_file_is_semver(self) -> None:
+        version = (SKILL_DIR / "VERSION").read_text(encoding="utf-8").strip()
+
+        self.assertRegex(version, r"^\d+\.\d+\.\d+$")
+
+
 if __name__ == "__main__":
     unittest.main()
