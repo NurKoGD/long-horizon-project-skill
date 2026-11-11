@@ -19,7 +19,9 @@ Resolve `<skill-directory>` to the directory containing this `SKILL.md`, never t
 python "<skill-directory>/scripts/init_skilluse.py" <project-path>
 ```
 
-Pass `--state-repo <url>` only when `skilluse/` is absent or empty; never clone over existing state. The initializer creates only missing files, overwrites nothing, and adds `/skilluse/` to the project `.gitignore`. If Python is unavailable, do the same by hand from `templates/`: create `skilluse/{context,plans/phases,logs,artifacts,local}`, copy the context templates and `backlog.md`, replace `{{skill_version}}` with `VERSION`, and ignore `/skilluse/`. Never skip the checkpoint because a script would not run.
+Pass `--state-repo <url>` only when `skilluse/` is absent or empty; never clone over existing state. The initializer creates only missing files, overwrites nothing, and adds `/skilluse/` to the project `.gitignore`.
+
+If `python` exits non-zero or prints nothing, try `python3`, `py -3`, or the interpreter the host provides, then confirm the script printed a `created:` or `SUMMARY:` line. A silent no-op means the interpreter is missing, not that the run succeeded. If Python is unavailable, do the same by hand from `templates/`: create `skilluse/{context,plans/phases,logs,artifacts,local}`, copy the context templates and `backlog.md`, replace `{{skill_version}}` with `VERSION`, and ignore `/skilluse/`. Never skip the checkpoint because a script would not run.
 
 Read the smallest useful context, in this order:
 
